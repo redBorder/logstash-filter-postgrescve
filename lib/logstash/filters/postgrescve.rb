@@ -9,8 +9,11 @@ require 'yaml'
 class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
   config_name 'postgrescve'
-
-  config :database_yml_path, :validate => :string, :default => "/var/www/rb-rails/config/database.yml"
+  config :host,     :validate => :string, :required => true
+  config :port,     :validate => :number, :default => 5432
+  config :user,     :validate => :string, :required => true
+  config :password, :validate => :string, :required => true
+  config :database, :validate => :string, :required => true
 
   public
   def register
@@ -63,18 +66,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def pg_conn_info
-    raise "Missing #{@database_yml_path}" unless File.exist?(@database_yml_path)
-
-    config = YAML.load_file(@database_yml_path)
-    env = config['production'] || config['development']
-    raise 'Missing production or development section in database.yml' unless env
-
     {
-      dbname: env['database'],
-      user: env['username'] || 'postgres',
-      password: env['password'] || '',
-      host: env['host'] || 'localhost',
-      port: env['port'] || 5432
+      dbname: @database,
+      user: @user,
+      password: @password,
+      host: @host,
+      port: @port
     }
   end
 
@@ -186,16 +183,25 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
   def get_cve_data(document)
     cve_extra = {}
-    cve_extra["cve"] = document["cve"]["CVE_data_meta"]["ID"]
-    if document["impact"].key?("baseMetricV3")
-      cve_extra["score"] = document["impact"]["baseMetricV3"]["cvssV3"]["baseScore"]
+    cve_extra["cve"] = document.dig("cve", "CVE_data_meta", "ID")
+    impact = document["impact"] || {}
+    if impact.key?("baseMetricV3") && impact["baseMetricV3"]["cvssV3"]
+      cvss3 = impact["baseMetricV3"]["cvssV3"]
+      cve_extra["score"] = cvss3["baseScore"]
       cve_extra["metric"] = "cvssV3"
-      cve_extra["severity"] = document["impact"]["baseMetricV3"]["cvssV3"]["baseSeverity"]
-    else
-      cve_extra["score"] = document["impact"]["baseMetricV2"]["cvssV2"]["baseScore"]
+      cve_extra["severity"] = cvss3["baseSeverity"]
+    elsif impact.key?("baseMetricV2") && impact["baseMetricV2"]["cvssV2"]
+      cvss2 = impact["baseMetricV2"]["cvssV2"]
+      cve_extra["score"] = cvss2["baseScore"]
       cve_extra["metric"] = "cvssV2"
-      cve_extra["severity"] = document["impact"]["baseMetricV2"]["severity"]
+      cve_extra["severity"] = impact["baseMetricV2"]["severity"]
+    else
+      # fallback/default if no score info
+      cve_extra["score"] = nil
+      cve_extra["metric"] = "none"
+      cve_extra["severity"] = "unknown"
     end
+
     cve_extra["cve_info"] = "https://nvd.nist.gov/vuln/detail/#{cve_extra['cve']}"
     cve_extra
   end
