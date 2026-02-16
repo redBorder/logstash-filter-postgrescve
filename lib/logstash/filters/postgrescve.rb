@@ -34,11 +34,11 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     input_event.delete('@timestamp')
     input_event.delete('@version')
 
-    cpe_p_v = get_prod_version(input_event["cpe"])
+    cpe_p_v = get_prod_version(input_event[:cpe])
     return unless cpe_p_v[0] # skip if no CPE
 
-    if !@cpes_availables.has_key?(input_event["cpe"])
-      @cpes_availables[input_event["cpe"]] = []
+    if !@cpes_availables.has_key?(input_event[:cpe])
+      @cpes_availables[input_event[:cpe]] = []
 
       # Query DB for rows containing the vendor-product CPE substring
       db_response = database(cpe_p_v[0])
@@ -53,10 +53,10 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
       cve_list.each do |cve|
         output_event = set_output_event(input_event, cve)
         yield output_event
-        @cpes_availables[input_event["cpe"]].push(cve)
+        @cpes_availables[input_event[:cpe]].push(cve)
       end
     else
-      @cpes_availables[input_event["cpe"]].each do |saved_cve|
+      @cpes_availables[input_event[:cpe]].each do |saved_cve|
         output_event = set_output_event(input_event, saved_cve)
         yield output_event
       end
