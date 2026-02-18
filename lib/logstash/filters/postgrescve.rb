@@ -30,7 +30,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   public
   def filter(event)
     # for testing
-    @cpes_availables = nil
+    # @cpes_availables = nil
     # 
     @logger.info("Postgrescve: Starting [DEBUG][filter]")
 
