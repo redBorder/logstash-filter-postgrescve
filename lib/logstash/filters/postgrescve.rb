@@ -137,14 +137,15 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, child['cpeMatch'], without_versions)
       end
     end
-    @logger.info("Postgrescve: Ending [DEBUG][find_cpe]")
+    @logger.info('Postgrescve: Ending [DEBUG][find_cpe]')
     cves.uniq
   end
 
   def scroll_cpe_match(cpe, cpe_match, without_versions)
     @logger.info("Postgrescve: Starting [DEBUG][scroll_cpe_match]")
     matched = cpe_match.any? do |elem|
-      cpe_db = get_prod_version(elem["cpe23Uri"])
+      # @logger.debug("elem #{elem}")
+      cpe_db = get_prod_version(elem['criteria'])
       if cpe[0] == cpe_db[0]
         if without_versions
           true
