@@ -91,7 +91,6 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     # out_event = EventDebug.new
     input_event.each do |k, v|
       out_event.set(k, v)
-      p out_event
     end
     cve.each { |k, v| out_event.set(k, v) }
     out_event.remove('@timestamp')
