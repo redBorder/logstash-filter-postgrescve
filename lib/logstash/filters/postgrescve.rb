@@ -30,7 +30,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   public
   def filter(event)
     # for testing
-    # @cpes_availables = nil
+    @cpes_availables = nil
     # 
     @logger.info("Postgrescve: Starting [DEBUG][filter]")
 
@@ -126,6 +126,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     @logger.info("Postgrescve: Starting [DEBUG][find_cpe]")
     cves = []
     nodes = document.dig("configurations", "nodes") || []
+    @logger.error("Nodes are not configured when fetching for cves") if nodes.nil? || nodes.empty?
     nodes.each do |node|
       if node.key?("cpe_match")
         cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, node["cpe_match"], without_versions)
