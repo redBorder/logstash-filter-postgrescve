@@ -123,20 +123,18 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   def find_cpe(cpe, document, without_versions)
     @logger.info("Postgrescve: Starting [DEBUG][find_cpe]")
     cves = []
-    @logger.debug("Document: #{document}")
-    @logger.debug("Document: #{document['cve']}")
-    @logger.debug("Document: #{document['cve']['configurations']}")
-    @logger.debug("Document: #{document['cve']['configurations']['nodes']}")
-    nodes = document.dig('cve', 'configurations', 'nodes') || []
-    @logger.error("Nodes are not configured when fetching for cves") if nodes.nil? || nodes.empty?
+    # @logger.debug("Document: #{document}")
+    # @logger.debug("Document CVE: #{document['cve']}")
+    # @logger.debug("Document CONFS: #{document['cve']['configurations']}")
+    # @logger.debug("Document NODES FIRST: #{document['cve']['configurations'].first['nodes']}")
+    configurations = document.dig('cve', 'configurations') || []
+    nodes = configurations.flat_map { |h| h['nodes'] || [] } || []
+    @logger.error('Nodes not present in cves') if nodes.empty?
     nodes.each do |node|
-      if node.key?("cpe_match")
-        cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, node["cpe_match"], without_versions)
-      end
-      if node.key?("children")
-        node["children"].each do |child|
-          cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, child["cpe_match"], without_versions)
-        end
+      @logger.debug("Node: #{node}")
+      cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, node['cpeMatch']&.to_a, without_versions)
+      node['children']&.each do |child|
+        cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, child['cpeMatch'], without_versions)
       end
     end
     @logger.info("Postgrescve: Ending [DEBUG][find_cpe]")
@@ -294,3 +292,4 @@ end
 #    puts "END SIMULACRO: EVENT CANCELLED: "
 #   end
 # end
+
