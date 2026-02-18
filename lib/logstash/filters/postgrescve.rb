@@ -50,16 +50,20 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
       without_versions = cpe_p_v[1].nil?
 
       cve_list = []
+      @logger.info("[PostgresCVE][Filter]: DB response: #{db_response}")
       db_response.each do |row|
-        @logger.debug(row)
         document = JSON.parse(row['data'])
+        @logger.info("[PostgresCVE][Filter]: To find: #{cpe_p_v}")
+        @logger.info("[PostgresCVE][Filter]: In document: #{document}")
+        @logger.info("[PostgresCVE][Filter]: Without versions: #{without_versions}")
         cve_list += find_cpe(cpe_p_v, document, without_versions)
       end
 
+      @logger.info("[PostgresCVE][Filter]: Cve list: #{cve_list}")
       cve_list.each do |cve|
         output_event = set_output_event(input_event, cve)
         yield output_event
-        @cpes_availables[input_event[:cpe]].push(cve)
+        @cpes_availables[cpe].push(cve)
       end
     else
       @logger.info("[PostgresCVE]: New cpe to be fetched: #{cpe}")
@@ -88,18 +92,28 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     }
   end
 
-  def set_output_event(input_event, cve)
-    @logger.info("[PostgresCVE]: Starting [DEBUG][set_output_event]")
-    p "outputing event"
+  def copy_input_event(input_event)
     out_event = LogStash::Event.new
     # out_event = EventDebug.new
     input_event.each do |k, v|
       out_event.set(k, v)
     end
-    cve.each { |k, v| out_event.set(k, v) }
+    out_event
+  end
+
+  def set_output_event(input_event, cve)
+    @logger.info '[PostgresCVE][set_output_event]: Starting'
+    out_event = copy_input_event(input_event)
+
+    # cve.each { |k, v| out_event.set(k, v) }
+    # add cve info
+    out_event.set('cve', cve)
+
+    # clean up event
     out_event.remove('@timestamp')
     out_event.remove('@version')
-    @logger.info("[PostgresCVE]: Ending [DEBUG][set_output_event]")
+
+    @logger.info '[PostgresCVE][set_output_event]: Ending'
     out_event
   end
 
@@ -128,15 +142,15 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def find_cpe(cpe, document, without_versions)
-    @logger.info("[PostgresCVE]: Starting [DEBUG][find_cpe]")
+    @logger.info '[PostgresCVE][Find cpe]: Starting'
     cves = []
     # @logger.debug("Document: #{document}")
     # @logger.debug("Document CVE: #{document['cve']}")
-    # @logger.debug("Document CONFS: #{document['cve']['configurations']}")
+    # @logger.info("[PostgresCVE][Find cpe]: configurations: #{document['cve']['configurations']}")
     # @logger.debug("Document NODES FIRST: #{document['cve']['configurations'].first['nodes']}")
-    configurations = document.dig('cve', 'configurations') || []
+    configurations = document.dig('cve', 'configurations') || [] # CHECKED
     nodes = configurations.flat_map { |h| h['nodes'] || [] } || []
-    @logger.error('Nodes not present in cves') if nodes.empty?
+    @logger.error '[PostgresCVE][filter]: Nodes not present in cves' if nodes.empty?
     nodes.each do |node|
       @logger.debug("Node: #{node}")
       cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, node['cpeMatch']&.to_a, without_versions)
@@ -144,14 +158,16 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, child['cpeMatch'], without_versions)
       end
     end
-    @logger.info("[PostgresCVE]: Ending [DEBUG][find_cpe]")
+    cves = cves.map do |cve|
+      cve.to_s.scan(/CVE-20\d{2}-\d{4,7}/)
+    end.flatten
     cves.uniq
   end
 
   def scroll_cpe_match(cpe, cpe_match, without_versions)
     @logger.info("[PostgresCVE]: Starting [DEBUG][scroll_cpe_match]")
     matched = cpe_match.any? do |elem|
-      # @logger.debug("elem #{elem}")
+      @logger.info("[PostgresCVE]: Starting [DEBUG][scroll_cpe_match]: criteria: #{elem['criteria']}")
       cpe_db = get_prod_version(elem['criteria'])
       if cpe[0] == cpe_db[0]
         if without_versions
@@ -215,33 +231,52 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def get_cve_data(document)
-    @logger.info("[PostgresCVE]: Starting [DEBUG][get_cve_data]")
+    @logger.info '[PostgresCVE]: Starting [DEBUG][get_cve_data]'
+
     cve_extra = {}
-    cve_extra["cve"] = document.dig("cve", "CVE_data_meta", "ID")
-    impact = document["impact"] || {}
-    if impact.key?("baseMetricV3") && impact["baseMetricV3"]["cvssV3"]
-      cvss3 = impact["baseMetricV3"]["cvssV3"]
-      cve_extra["score"] = cvss3["baseScore"]
-      cve_extra["metric"] = "cvssV3"
-      cve_extra["severity"] = cvss3["baseSeverity"]
-    elsif impact.key?("baseMetricV2") && impact["baseMetricV2"]["cvssV2"]
-      cvss2 = impact["baseMetricV2"]["cvssV2"]
-      cve_extra["score"] = cvss2["baseScore"]
-      cve_extra["metric"] = "cvssV2"
-      cve_extra["severity"] = impact["baseMetricV2"]["severity"]
+
+    cve_id = document.dig('cve', 'id')
+    cve_extra['cve'] = cve_id
+    metrics = document['metrics'] || {}
+
+    # Handle CVSSv3 (assume it's a hash)
+    if (cvss3 = metrics.dig('cvssMetricV3', 'cvssV3'))
+      cve_extra['score'] = cvss3['impactScore'] #??
+      cve_extra['metric'] = 'cvssV3'
+      cve_extra['severity'] = cvss3['baseSeverity']
+
+    # Handle CVSSv2 (may be array)
+    elsif (cvss2_array = metrics['cvssMetricV2'])
+      # Take the first element if array, or handle hash directly
+      cvss2_data = cvss2_array.is_a?(Array) ? cvss2_array.first['cvssData'] : cvss2_array['cvssV2']
+      severity = cvss2_array.is_a?(Array) ? cvss2_array.first['baseSeverity'] : cvss2_array['severity']
+
+      if cvss2_data
+        cve_extra['score'] = cvss2_array.is_a?(Array) ? cvss2_array.first['impactScore'] : cvss2_array['impactScore']
+        cve_extra['metric'] = 'cvssV2'
+        cve_extra['severity'] = severity
+      else
+        # fallback if cvss2_data missing
+        cve_extra['score'] = nil
+        cve_extra['metric'] = 'cvssV2'
+        cve_extra['severity'] = 'unknown'
+      end
+
+    # fallback/default if no CVSS info
     else
-      # fallback/default if no score info
-      cve_extra["score"] = nil
-      cve_extra["metric"] = "none"
-      cve_extra["severity"] = "unknown"
+      cve_extra['score'] = nil
+      cve_extra['metric'] = 'none'
+      cve_extra['severity'] = 'unknown'
     end
 
-    cve_extra["cve_info"] = "https://nvd.nist.gov/vuln/detail/#{cve_extra['cve']}"
-    @logger.info("[PostgresCVE]: Ending [DEBUG][get_cve_data]")
+    cve_extra['cve_info'] = "https://nvd.nist.gov/vuln/detail/#{cve_id}"
+
+    @logger.info '[PostgresCVE]: Ending [DEBUG][get_cve_data]'
     cve_extra
   end
 
   def database(cpe_vendor_product)
+    @logger.info("[PostgresCVE][database] Quering: #{cpe_vendor_product}")
     sql = <<~SQL
       SELECT data FROM cves
       WHERE data::text ILIKE '%:a:#{cpe_vendor_product}:%'
@@ -255,7 +290,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
     result = @conn.exec(sql)
     result.to_a
-  rescue => e
+  rescue StandardError => e
     @logger.error("[PostgresCVE][database] Query error: #{e}")
     []
   end
