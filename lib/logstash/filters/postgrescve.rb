@@ -248,7 +248,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     # for example             select * from cves where data::text ilike '.*:a:nginx:nginx:.*' limit 1;
     # for example             select * from cves where data::text ilike '%cpe:2.3:a:eric_allman:sendmail:5.58%' limit 1;
     # metaesploitable example select * from cves where data::text ilike '%:a:mysql:mysql%' limit 1;
-    # metaesploitable example select * from cves where data::text ilike '%mysql:mysql%' limit 1;
+    # metaesploitable example select data from cves where data::text ilike '%mysql:mysql%' limit 1;
 
     result = @conn.exec(sql)
     result.to_a
