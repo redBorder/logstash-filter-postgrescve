@@ -7,7 +7,6 @@ require 'json'
 require 'yaml'
 
 class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
-
   config_name 'postgrescve'
   config :host,     :validate => :string, :required => true
   config :port,     :validate => :number, :default => 5432
@@ -30,7 +29,10 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
   public
   def filter(event)
-    @logger.debug("Postgrescve: Starting [DEBUG][filter]")
+    # for testing
+    # @cpes_availables = nil
+    # 
+    @logger.info("Postgrescve: Starting [DEBUG][filter]")
 
     input_event = event.to_hash
     input_event.delete('@timestamp')
@@ -38,8 +40,8 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
     cpe_p_v = get_prod_version(input_event[:cpe])
     return unless cpe_p_v[0] # skip if no CPE
-
-    if !@cpes_availables.has_key?(input_event[:cpe])
+    @cpes_availables ||= {}
+    if !(@cpes_availables.has_key?(input_event[:cpe]))
       @cpes_availables[input_event[:cpe]] = []
 
       # Query DB for rows containing the vendor-product CPE substring
@@ -63,12 +65,17 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         yield output_event
       end
     end
-    @logger.debug("Postgrescve: Ending [DEBUG][filter]")
+    @logger.info("Postgrescve: Ending [DEBUG][filter]")
 
     event.cancel
   end
 
   def pg_conn_info
+    # @database = 'redborder'
+    # @host = 'master.postgresql.service'
+    # @password = 'n2w7o8GUdctxl2zWxkLLj6ryuO11Z433sNP8w294Ay7G7DQMybfaK8hXQ7v2lczcYQ8kbCRSZO5dsoV68XvTqsB5XqaPvGUELqxtB0KQpED29GLgAfERSPJ1mq7YCt68'
+    # @port = 5432
+    # @user = 'redborder'
     {
       dbname: @database,
       user: @user,
@@ -79,24 +86,28 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def set_output_event(input_event, cve)
-    @logger.debug("Postgrescve: Starting [DEBUG][set_output_event]")
+    @logger.info("Postgrescve: Starting [DEBUG][set_output_event]")
+    p "outputing event"
     out_event = LogStash::Event.new
-    input_event.each { |k, v| out_event.set(k, v) }
+    input_event.each do |k, v|
+      out_event.set(k, v)
+      p out_event
+    end
     cve.each { |k, v| out_event.set(k, v) }
     out_event.remove('@timestamp')
     out_event.remove('@version')
-    @logger.debug("Postgrescve: Ending [DEBUG][set_output_event]")
+    @logger.info("Postgrescve: Ending [DEBUG][set_output_event]")
     out_event
   end
 
   def get_prod_version(cpe_orig)
-    @logger.debug("Postgrescve: Starting [DEBUG][get_prod_version]")
+    @logger.info("Postgrescve: Starting [DEBUG][get_prod_version]")
     cpe_vendor_product_version = cpe_orig.match('cpe:2.3:a:') ? cpe_orig.split('cpe:2.3:a:')[-1] : cpe_orig
     result = []
     parts = cpe_vendor_product_version.split(':')
     result.push(parts[0..1].join(':'))
     result.push(parts[2]) if parts.length >= 3
-    @logger.debug("Postgrescve: Ending [DEBUG][get_prod_version]")
+    @logger.info("Postgrescve: Ending [DEBUG][get_prod_version]")
     result
   end
 
@@ -112,7 +123,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def find_cpe(cpe, document, without_versions)
-    @logger.debug("Postgrescve: Starting [DEBUG][find_cpe]")
+    @logger.info("Postgrescve: Starting [DEBUG][find_cpe]")
     cves = []
     nodes = document.dig("configurations", "nodes") || []
     nodes.each do |node|
@@ -125,12 +136,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         end
       end
     end
-    @logger.debug("Postgrescve: Ending [DEBUG][find_cpe]")
+    @logger.info("Postgrescve: Ending [DEBUG][find_cpe]")
     cves.uniq
   end
 
   def scroll_cpe_match(cpe, cpe_match, without_versions)
-    @logger.debug("Postgrescve: Starting [DEBUG][scroll_cpe_match]")
+    @logger.info("Postgrescve: Starting [DEBUG][scroll_cpe_match]")
     matched = cpe_match.any? do |elem|
       cpe_db = get_prod_version(elem["cpe23Uri"])
       if cpe[0] == cpe_db[0]
@@ -149,12 +160,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         false
       end
     end
-    @logger.debug("Postgrescve: Ending [DEBUG][scroll_cpe_match]")
+    @logger.info("Postgrescve: Ending [DEBUG][scroll_cpe_match]")
     matched
   end
 
   def version_range(cpe, cpe_match_elem)
-    @logger.debug("Postgrescve: Starting [DEBUG][version_range]")
+    @logger.info("Postgrescve: Starting [DEBUG][version_range]")
     inside_range = false
     if cpe_match_elem.key?("versionEndExcluding")
       if cpe_match_elem.key?("versionStartIncluding")
@@ -190,12 +201,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
        !cpe_match_elem.key?("versionEndExcluding") && !cpe_match_elem.key?("versionEndIncluding")
       inside_range = true
     end
-    @logger.debug("Postgrescve: Ending [DEBUG][version_range]")
+    @logger.info("Postgrescve: Ending [DEBUG][version_range]")
     inside_range
   end
 
   def get_cve_data(document)
-    @logger.debug("Postgrescve: Starting [DEBUG][get_cve_data]")
+    @logger.info("Postgrescve: Starting [DEBUG][get_cve_data]")
     cve_extra = {}
     cve_extra["cve"] = document.dig("cve", "CVE_data_meta", "ID")
     impact = document["impact"] || {}
@@ -217,7 +228,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     end
 
     cve_extra["cve_info"] = "https://nvd.nist.gov/vuln/detail/#{cve_extra['cve']}"
-    @logger.debug("Postgrescve: Ending [DEBUG][get_cve_data]")
+    @logger.info("Postgrescve: Ending [DEBUG][get_cve_data]")
     cve_extra
   end
 
@@ -240,3 +251,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     []
   end
 end
+
+# For debugging
+# class Hash
+#   def cancel
+#    puts "SIMULACRO: EVENT CANCELLED: "
+#    self
+#    puts "END SIMULACRO: EVENT CANCELLED: "
+#   end
+# end
