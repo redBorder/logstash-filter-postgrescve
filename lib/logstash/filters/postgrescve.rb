@@ -87,6 +87,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     @logger.info("Postgrescve: Starting [DEBUG][set_output_event]")
     p "outputing event"
     out_event = LogStash::Event.new
+    # out_event = EventDebug.new
     input_event.each do |k, v|
       out_event.set(k, v)
       p out_event
@@ -294,3 +295,57 @@ end
 #   end
 # end
 
+
+# Simple Event class to simulate Logstash::Event
+# class EventDebug
+#   attr_accessor :fields, :metadata
+
+#   def initialize(initial_fields = {})
+#     @fields = initial_fields.dup
+#     @metadata = {
+#       "@timestamp" => Time.now.utc,
+#       "@version" => "1"
+#     }
+#   end
+
+#   def remove(key)
+#     @fields.delete(key)
+#   end
+
+#   # Hash-like access
+#   def [](key)
+#     @fields[key]
+#   end
+
+#   def []=(key, value)
+#     @fields[key] = value
+#   end
+
+#   # Logstash-style set/get methods
+#   def set(key, value)
+#     @fields[key] = value
+#   end
+
+#   def get(key)
+#     @fields[key]
+#   end
+
+#   # Tag support
+#   def tag(tag_name)
+#     @fields["tags"] ||= []
+#     @fields["tags"] << tag_name
+#   end
+
+#   # Return combined hash
+#   def to_h
+#     @metadata.merge(@fields)
+#   end
+# end
+
+# Usage
+# event = EventDebug.new
+# event.set("message", "Hello CVE")
+# event.set("severity", "high")
+# event.tag("cve_import")
+
+# puts event.to_h
