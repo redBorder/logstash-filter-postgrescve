@@ -29,9 +29,6 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
   public
   def filter(event)
-    # for testing
-    # @cpes_availables = nil
-    # 
     @logger.info("Postgrescve: Starting [DEBUG][filter]")
 
     input_event = event.to_hash
@@ -50,6 +47,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
       cve_list = []
       db_response.each do |row|
+        @logger.debug(row)
         document = JSON.parse(row['data'])
         cve_list += find_cpe(cpe_p_v, document, without_versions)
       end
@@ -125,7 +123,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   def find_cpe(cpe, document, without_versions)
     @logger.info("Postgrescve: Starting [DEBUG][find_cpe]")
     cves = []
-    nodes = document.dig("configurations", "nodes") || []
+    nodes = document.dig('cve', 'configurations', 'nodes') || []
     @logger.error("Nodes are not configured when fetching for cves") if nodes.nil? || nodes.empty?
     nodes.each do |node|
       if node.key?("cpe_match")
@@ -235,7 +233,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
   def database(cpe_vendor_product)
     sql = <<~SQL
-      SELECT * FROM cves
+      SELECT data FROM cves
       WHERE data::text ILIKE '%:a:#{cpe_vendor_product}:%'
       LIMIT 1000
     SQL
@@ -253,7 +251,37 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 end
 
-# For debugging
+# Helpers for directly debugging in IRB:
+# def debug
+#   @cpes_availables = nil
+#   event = {
+#     "cpe": "cpe:2.3:a:unrealircd:unrealircd",
+#     "scan_id": "9",
+#     "scan_type": "2",
+#     "name": "scanner",
+#     "uuid": "8534becf-c628-4a9a-8e96-f5b75afcaf7e",
+#     "campus": "",
+#     "campus_uuid": "",
+#     "deployment": "",
+#     "deployment_uuid": "",
+#     "zone": "",
+#     "zone_uuid": "",
+#     "market": "",
+#     "market_uuid": "",
+#     "floor": "",
+#     "floor_uuid": "",
+#     "ipv4": "10.1.32.81",
+#     "timestamp": 1771410211,
+#     "product": "UnrealIRCd",
+#     "version": nil,
+#     "servicename": nil,
+#     "protocol": "tcp",
+#     "port_state": "open",
+#     "port": "6667"
+#   }
+#   filter event
+# end
+
 # class Hash
 #   def cancel
 #    puts "SIMULACRO: EVENT CANCELLED: "
