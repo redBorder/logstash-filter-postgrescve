@@ -37,12 +37,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
 
     @logger.info("[PostgresCVE]: Clean input: #{input_event}")
     cpe = input_event['cpe']
+    @logger.info "[PostgresCVE]: New cpe to be fetched: #{cpe}"
     cpe_p_v = get_prod_version(cpe)
     return if cpe_p_v.empty?
 
     @cpes_availables ||= {}
-    if !(@cpes_availables.has_key?(cpe))
-      @logger.info("[PostgresCVE]: New cpe to be fetched: #{cpe}")
+    if !(@cpes_availables.key? cpe)
       @cpes_availables[cpe] = []
 
       # Query DB for rows containing the vendor-product CPE substring
@@ -65,12 +65,13 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         yield output_event
         @cpes_availables[cpe].push(cve)
       end
-    else
       @logger.info("[PostgresCVE]: New cpe to be fetched: #{cpe}")
       @cpes_availables[cpe].each do |saved_cve|
         output_event = set_output_event(input_event, saved_cve)
         yield output_event
       end
+    else
+
     end
     @logger.info("[PostgresCVE]: Ending [DEBUG][filter]")
 
@@ -142,6 +143,8 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def find_cpe(cpe, document, without_versions)
+    # input:  string cpe as key and hash document as complex hash map.
+    # output: array
     @logger.info '[PostgresCVE][Find cpe]: Starting'
     cves = []
     # @logger.debug("Document: #{document}")
@@ -231,45 +234,34 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def get_cve_data(document)
+    # input: hash document as complex hash map.
+    # output: hash info in one level
     @logger.info '[PostgresCVE]: Starting [DEBUG][get_cve_data]'
-
-    cve_extra = {}
-
     cve_id = document.dig('cve', 'id')
-    cve_extra['cve'] = cve_id
+    cve_extra = {
+      id: cve_id,
+      score: nil,
+      metric: 'none',
+      severity: 'unknown',
+      cve_info: "https://nvd.nist.gov/vuln/detail/#{cve_id}"
+    }
+
     metrics = document['metrics'] || {}
 
     # Handle CVSSv3 (assume it's a hash)
     if (cvss3 = metrics.dig('cvssMetricV3', 'cvssV3'))
-      cve_extra['score'] = cvss3['impactScore'] #??
       cve_extra['metric'] = 'cvssV3'
+      cve_extra['score'] = cvss3['impactScore'] # TODO: Check
       cve_extra['severity'] = cvss3['baseSeverity']
-
-    # Handle CVSSv2 (may be array)
     elsif (cvss2_array = metrics['cvssMetricV2'])
-      # Take the first element if array, or handle hash directly
       cvss2_data = cvss2_array.is_a?(Array) ? cvss2_array.first['cvssData'] : cvss2_array['cvssV2']
       severity = cvss2_array.is_a?(Array) ? cvss2_array.first['baseSeverity'] : cvss2_array['severity']
-
+      cve_extra['metric'] = 'cvssV2'
       if cvss2_data
         cve_extra['score'] = cvss2_array.is_a?(Array) ? cvss2_array.first['impactScore'] : cvss2_array['impactScore']
-        cve_extra['metric'] = 'cvssV2'
         cve_extra['severity'] = severity
-      else
-        # fallback if cvss2_data missing
-        cve_extra['score'] = nil
-        cve_extra['metric'] = 'cvssV2'
-        cve_extra['severity'] = 'unknown'
       end
-
-    # fallback/default if no CVSS info
-    else
-      cve_extra['score'] = nil
-      cve_extra['metric'] = 'none'
-      cve_extra['severity'] = 'unknown'
     end
-
-    cve_extra['cve_info'] = "https://nvd.nist.gov/vuln/detail/#{cve_id}"
 
     @logger.info '[PostgresCVE]: Ending [DEBUG][get_cve_data]'
     cve_extra
