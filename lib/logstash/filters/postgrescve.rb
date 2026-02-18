@@ -123,6 +123,10 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   def find_cpe(cpe, document, without_versions)
     @logger.info("Postgrescve: Starting [DEBUG][find_cpe]")
     cves = []
+    @logger.debug("Document: #{document}")
+    @logger.debug("Document: #{document['cve']}")
+    @logger.debug("Document: #{document['cve']['configurations']}")
+    @logger.debug("Document: #{document['cve']['configurations']['nodes']}")
     nodes = document.dig('cve', 'configurations', 'nodes') || []
     @logger.error("Nodes are not configured when fetching for cves") if nodes.nil? || nodes.empty?
     nodes.each do |node|
@@ -251,7 +255,8 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 end
 
-# Helpers for directly debugging in IRB:
+## Helpers for directly debugging in IRB:
+
 # def debug
 #   @cpes_availables = nil
 #   event = {
