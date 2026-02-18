@@ -36,7 +36,8 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     input_event.delete('@version')
 
     cpe_p_v = get_prod_version(input_event[:cpe])
-    return unless cpe_p_v[0] # skip if no CPE
+    return if cpe_p_v.empty?
+
     @cpes_availables ||= {}
     if !(@cpes_availables.has_key?(input_event[:cpe]))
       @cpes_availables[input_event[:cpe]] = []
@@ -100,6 +101,8 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
   end
 
   def get_prod_version(cpe_orig)
+    return [] unless cpe_orig
+
     @logger.info("Postgrescve: Starting [DEBUG][get_prod_version]")
     cpe_vendor_product_version = cpe_orig.match('cpe:2.3:a:') ? cpe_orig.split('cpe:2.3:a:')[-1] : cpe_orig
     result = []
