@@ -50,12 +50,12 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
       without_versions = cpe_p_v[1].nil?
 
       cve_list = []
-      @logger.info("[PostgresCVE][Filter]: DB response: #{db_response}")
+      # @logger.info("[PostgresCVE][Filter]: DB response: #{db_response}")
       db_response.each do |row|
         document = JSON.parse(row['data'])
         @logger.info("[PostgresCVE][Filter]: To find: #{cpe_p_v}")
-        @logger.info("[PostgresCVE][Filter]: In document: #{document}")
-        @logger.info("[PostgresCVE][Filter]: Without versions: #{without_versions}")
+        # @logger.info("[PostgresCVE][Filter]: In document: #{document}")
+        # @logger.info("[PostgresCVE][Filter]: Without versions: #{without_versions}")
         cve_list += find_cpe(cpe_p_v, document, without_versions)
       end
 
@@ -93,29 +93,25 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     }
   end
 
-  def copy_input_event(input_event)
-    out_event = LogStash::Event.new
-    # out_event = EventDebug.new
-    input_event.each do |k, v|
-      out_event.set(k, v)
-    end
-    out_event
-  end
-
-  def set_output_event(input_event, cve)
+  def set_output_event(input_event, cve_info)
     @logger.info '[PostgresCVE][set_output_event]: Starting'
-    out_event = copy_input_event(input_event)
 
-    # cve.each { |k, v| out_event.set(k, v) }
-    # add cve info
-    out_event.set('cve', cve)
+    @logger.info '[PostgresCVE][set_output_event]: Gathering output data'
+    cve_info = {} unless cve_info.is_a?(Hash)
+    output_hash = input_event.merge(cve_info)
 
-    # clean up event
-    out_event.remove('@timestamp')
-    out_event.remove('@version')
-
-    @logger.info '[PostgresCVE][set_output_event]: Ending'
-    out_event
+    @logger.info '[PostgresCVE][set_output_event]: Building output event'
+    output_hash.each do |k, v|
+      begin
+        out_event = LogStash::Event.new
+        out_event.set(k.to_s, v.to_s)
+        @logger.info "[PostgresCVE][set_output_event]: Set key=#{k}, value=#{v.inspect} in new event"
+        out_event
+      rescue StandardError => e
+        @logger.warn "[PostgresCVE][set_output_event]: Failed to set key=#{k}, value=#{v.inspect} - #{e.message}"
+        return nil
+      end
+    end
   end
 
   def get_prod_version(cpe_orig)
@@ -146,7 +142,7 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     # input:  string cpe as key and hash document as complex hash map.
     # output: array
     @logger.info '[PostgresCVE][Find cpe]: Starting'
-    cves = []
+    cves = [] # will be filled with hashes with cve info
     # @logger.debug("Document: #{document}")
     # @logger.debug("Document CVE: #{document['cve']}")
     # @logger.info("[PostgresCVE][Find cpe]: configurations: #{document['cve']['configurations']}")
@@ -161,9 +157,6 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
         cves.push(get_cve_data(document)) if scroll_cpe_match(cpe, child['cpeMatch'], without_versions)
       end
     end
-    cves = cves.map do |cve|
-      cve.to_s.scan(/CVE-20\d{2}-\d{4,7}/)
-    end.flatten
     cves.uniq
   end
 
@@ -233,37 +226,73 @@ class LogStash::Filters::PostgresCVE < LogStash::Filters::Base
     inside_range
   end
 
+  def cvss3?(metrics)
+    metrics.to_s.scan(/cvssMetricV3/).any?
+  end
+
+  def cvss2?(metrics)
+    metrics.to_s.scan(/cvssMetricV2/).any?
+  end
+
+  def cvss3_key(metrics)
+    # Key can be either 'cvssMetricV3' or 'cvssMetricV31' or similar
+    metrics.keys.find { |k| k =~ /cvssMetricV3/ }
+  end
+
   def get_cve_data(document)
-    # input: hash document as complex hash map.
-    # output: hash info in one level
     @logger.info '[PostgresCVE]: Starting [DEBUG][get_cve_data]'
-    cve_id = document.dig('cve', 'id')
+    @logger.info '[PostgresCVE][get_cve_data]: Document: ' + document.to_s
+
     cve_extra = {
-      id: cve_id,
-      score: nil,
+      id: nil,
+      cve_info: nil,
       metric: 'none',
-      severity: 'unknown',
-      cve_info: "https://nvd.nist.gov/vuln/detail/#{cve_id}"
+      score: nil,
+      severity: 'unknown'
     }
 
-    metrics = document['metrics'] || {}
-
-    # Handle CVSSv3 (assume it's a hash)
-    if (cvss3 = metrics.dig('cvssMetricV3', 'cvssV3'))
-      cve_extra['metric'] = 'cvssV3'
-      cve_extra['score'] = cvss3['impactScore'] # TODO: Check
-      cve_extra['severity'] = cvss3['baseSeverity']
-    elsif (cvss2_array = metrics['cvssMetricV2'])
-      cvss2_data = cvss2_array.is_a?(Array) ? cvss2_array.first['cvssData'] : cvss2_array['cvssV2']
-      severity = cvss2_array.is_a?(Array) ? cvss2_array.first['baseSeverity'] : cvss2_array['severity']
-      cve_extra['metric'] = 'cvssV2'
-      if cvss2_data
-        cve_extra['score'] = cvss2_array.is_a?(Array) ? cvss2_array.first['impactScore'] : cvss2_array['impactScore']
-        cve_extra['severity'] = severity
-      end
+    begin
+      cve_id = document.dig('cve', 'id')
+      cve_extra[:id] = cve_id
+      cve_extra[:cve_info] = "https://nvd.nist.gov/vuln/detail/#{cve_id}"
+    rescue => e
+      @logger.warn "[PostgresCVE][get_cve_data]: Failed to get CVE ID - #{e.message}"
     end
 
-    @logger.info '[PostgresCVE]: Ending [DEBUG][get_cve_data]'
+    begin
+      metrics = document.dig('cve', 'metrics') || {}
+
+      # Find CVSSv3 key
+      cvss3_key = metrics.keys.find { |k| k =~ /cvssMetricV3/ } rescue nil
+
+      if cvss3_key
+        @logger.info '[PostgresCVE][get_cve_data]: Version 3'
+        cve_extra[:metric] = 'cvssV3'
+
+        cvss3_data = metrics[cvss3_key]
+        cvss3 = cvss3_data.is_a?(Array) ? cvss3_data.first : cvss3_data
+
+        cve_extra[:score] = cvss3['impactScore'] rescue nil
+        cve_extra[:severity] = cvss3.dig('cvssData', 'baseSeverity') rescue 'unknown'
+
+      elsif metrics['cvssMetricV2']
+        @logger.info '[PostgresCVE][get_cve_data]: Version 2'
+        cve_extra[:metric] = 'cvssV2'
+
+        cvss2_data = metrics['cvssMetricV2']
+        cvss2 = cvss2_data.is_a?(Array) ? cvss2_data.first : cvss2_data
+
+        cve_extra[:score] = cvss2['impactScore'] rescue nil
+        cve_extra[:severity] = cvss2['baseSeverity'] || cvss2.dig('cvssData', 'baseSeverity') rescue 'unknown'
+
+      else
+        @logger.error '[PostgresCVE][get_cve_data]: CVSS Version N/A'
+      end
+    rescue => e
+      @logger.error "[PostgresCVE][get_cve_data]: Failed to process metrics - #{e.message}"
+    end
+
+    @logger.info "[PostgresCVE]: CVE data gotten: #{cve_extra}"
     cve_extra
   end
 
