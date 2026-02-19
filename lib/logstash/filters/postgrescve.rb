@@ -203,7 +203,7 @@ module LogStash
 
       def get_cve_data(document)
         cve_extra = {
-          id: nil,
+          cve: nil,
           cve_info: nil,
           metric: 'none',
           score: nil,
@@ -212,7 +212,7 @@ module LogStash
 
         begin
           cve_id = document.dig('cve', 'id')
-          cve_extra[:id] = cve_id
+          cve_extra[:cve] = cve_id
           cve_extra[:cve_info] = "https://nvd.nist.gov/vuln/detail/#{cve_id}"
         rescue StandardError => e
           @logger.error "[PostgresCVE][get_cve_data]: Failed to get CVE ID - #{e.message}"
