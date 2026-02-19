@@ -136,7 +136,7 @@ module LogStash
             if without_versions
               true
             elsif cpe_db[1] != '*' && !cpe_db[1].nil?
-              compare_version(cpe[1], cpe_db[1]).zero?
+              compare_version(cpe[1], cpe_db[1]) == 0
             elsif cpe_db[1] == '*'
               version_range(cpe, elem)
             else
