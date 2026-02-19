@@ -89,8 +89,6 @@ module LogStash
       end
 
       def set_output_event(input_event, cve_info)
-
-
         @logger.info '[PostgresCVE][set_output_event]: Gathering output data'
         cve_info = {} unless cve_info.is_a?(Hash)
         output_hash = input_event.merge(cve_info)
