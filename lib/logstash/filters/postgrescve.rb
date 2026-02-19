@@ -38,7 +38,7 @@ module LogStash
         cpe = input_event['cpe']
         @logger.info "[PostgresCVE]: New cpe to be fetched: #{cpe}"
         cpe_p_v = get_prod_version(cpe)
-        return if cpe_p_v.empty?
+        return event.cancel if cpe_p_v.empty?
 
         @cpes_availables ||= {}
         unless @cpes_availables.key? cpe
@@ -70,8 +70,6 @@ module LogStash
             yield output_event
           end
         end
-        @logger.info('[PostgresCVE]: Ending [DEBUG][filter]')
-
         event.cancel
       end
 
@@ -91,34 +89,36 @@ module LogStash
       end
 
       def set_output_event(input_event, cve_info)
-        @logger.info '[PostgresCVE][set_output_event]: Starting'
+
 
         @logger.info '[PostgresCVE][set_output_event]: Gathering output data'
         cve_info = {} unless cve_info.is_a?(Hash)
         output_hash = input_event.merge(cve_info)
 
         @logger.info '[PostgresCVE][set_output_event]: Building output event'
+        out_event = LogStash::Event.new
         output_hash.each do |k, v|
-          out_event = LogStash::Event.new
-          out_event.set(k.to_s, v.to_s)
           @logger.info "[PostgresCVE][set_output_event]: Set key=#{k}, value=#{v.inspect} in new event"
-          out_event
+          out_event.set(k.to_s, v)
         rescue StandardError => e
           @logger.warn "[PostgresCVE][set_output_event]: Failed to set key=#{k}, value=#{v.inspect} - #{e.message}"
           return nil
         end
+        @logger.info '[PostgresCVE][set_output_event]: SENDING EVENT'
+        out_event
       end
 
       def get_prod_version(cpe_orig)
         return [] unless cpe_orig
 
-        @logger.info('[PostgresCVE]: Starting [DEBUG][get_prod_version]')
-        cpe_vendor_product_version = cpe_orig.match('cpe:2.3:a:') ? cpe_orig.split('cpe:2.3:a:')[-1] : cpe_orig
+        @logger.info '[PostgresCVE][get_prod_version]: Starting'
         result = []
+        cpe_vendor_product_version = cpe_orig.match('cpe:2.3:a:') ? cpe_orig.split('cpe:2.3:a:')[-1] : cpe_orig
         parts = cpe_vendor_product_version.split(':')
         result.push(parts[0..1].join(':'))
         result.push(parts[2]) if parts.length >= 3
-        @logger.info('[PostgresCVE]: Ending [DEBUG][get_prod_version]')
+
+        @logger.info("[PostgresCVE][get_prod_version]: Ending with #{result}")
         result
       end
 
@@ -249,7 +249,7 @@ module LogStash
           cve_extra[:id] = cve_id
           cve_extra[:cve_info] = "https://nvd.nist.gov/vuln/detail/#{cve_id}"
         rescue StandardError => e
-          @logger.warn "[PostgresCVE][get_cve_data]: Failed to get CVE ID - #{e.message}"
+          @logger.error "[PostgresCVE][get_cve_data]: Failed to get CVE ID - #{e.message}"
         end
 
         begin
@@ -314,7 +314,7 @@ module LogStash
         sql = <<~SQL
           SELECT data FROM cves
           WHERE data::text ILIKE '%:a:#{cpe_vendor_product}:%'
-          LIMIT 1000
+          LIMIT 1;
         SQL
 
         # for example             select * from cves where data::text ilike '.*:a:nginx:nginx:.*' limit 1;
