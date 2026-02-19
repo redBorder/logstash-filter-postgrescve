@@ -277,7 +277,7 @@ module LogStash
         sql = <<~SQL
           SELECT data FROM cves
           WHERE data::text ILIKE '%:a:#{cpe_vendor_product}:%'
-          LIMIT 1;
+          LIMIT 1000;
         SQL
 
         result = @conn.exec(sql)
